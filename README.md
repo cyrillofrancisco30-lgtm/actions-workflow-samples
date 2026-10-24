@@ -1,4 +1,331 @@
-## Starter Action Workflows to deploy to Azure
+name: Homologation runner
+
+on:
+  workflow_dispatch:
+    inputs:
+      ruid:
+        description: Run unique ID
+        required: true
+  push:
+    branches:
+      - master
+
+permissions:
+  contents: read
+
+jobs:
+  homologation:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install -r ci/requirements.txt
+
+      - name: Generate evidence manifest
+        env:
+          RUID: ${{ github.event_name == 'workflow_dispatch' && inputs.ruid || github.run_id }}
+        run: |
+          mkdir -p evidence
+          python - <<'PY'
+          import json, os
+          from datetime import datetime, timezone
+
+          manifest = {
+              "schema_version": "1.0.0",
+              "ruid": os.environ.get("RUID", ""),
+              "run_id": os.environ.get("GITHUB_RUN_ID", ""),
+              "run_number": os.environ.get("GITHUB_RUN_NUMBER", ""),
+              "workflow": os.environ.get("GITHUB_WORKFLOW", ""),
+              "repository": os.environ.get("GITHUB_REPOSITORY", ""),
+              "sha": os.environ.get("GITHUB_SHA", ""),
+              "ref": os.environ.get("GITHUB_REF", ""),
+              "created_at_utc": datetime.now(timezone.utc).isoformat(),
+              "status": "generated"
+          }
+
+          with open("evidence/manifest.json", "w", encoding="utf-8") as f:
+              json.dump(manifest, f, indent=2)
+          PY
+
+      - name: Upload evidence artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 30
+          
+
+
+          name: Evidence validation
+
+on:
+  workflow_dispatch:
+    inputs:
+      ruid:
+        description: Run unique ID
+        required: true
+  workflow_run:
+    workflows: ["Homologation runner"]
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: read
+  id-token: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install -r ci/requirements.txt
+
+      - name: Download evidence artifact from triggering workflow
+        if: ${{ github.event_name == 'workflow_run' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: evidence
+          path: evidence
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Validate evidence
+        env:
+          RUID: ${{ github.event_name == 'workflow_dispatch' && inputs.ruid || github.event.workflow_run.id }}
+          EXPECTED_COMMIT: ${{ github.event_name == 'workflow_dispatch' && github.sha || github.event.workflow_run.head_sha }}
+        run: |
+          echo "RUID=$RUID"
+          echo "EXPECTED_COMMIT=$EXPECTED_COMMIT"
+
+          if [ ! -f evidence/manifest.json ]; then
+            echo "manifest.json not found in evidence/"
+            ls -R evidence || true
+            exit 1
+          fi
+
+          python -m ci.validate_evidence \
+            --ruid "$RUID" \
+            --expected-commit "$EXPECTED_COMMIT" \
+            --manifest evidence/manifest.json \
+            --output evidence/validated-graph.json
+
+
+            
+          
+          ## Starter Action Workflows to deploy to Azure
+
+Você precisa separar em dois arquivos distintos dentro de `.github/workflows/`:
+
+- `.github/workflows/homologation-runner.yml`
+- `.github/workflows/evidence-validation.yml`
+
+O bloco que você colou tem:
+- dois `name:`
+- dois `on:`
+- tudo em um único arquivo
+- isso não funciona em GitHub Actions
+
+Estrutura correta
+
+Arquivo 1: `.github/workflows/homologation-runner.yml`
+
+```yaml
+name: Homologation runner
+
+on:
+  workflow_dispatch:
+    inputs:
+      ruid:
+        description: Run unique ID
+        required: true
+  push:
+    branches:
+      - master
+
+permissions:
+  contents: read
+
+jobs:
+  homologation:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install -r ci/requirements.txt
+
+      - name: Generate evidence manifest
+        env:
+          RUID: ${{ github.event_name == 'workflow_dispatch' && inputs.ruid || github.run_id }}
+        run: |
+          mkdir -p evidence
+          python - <<'PY'
+          import json, os
+          from datetime import datetime, timezone
+
+          manifest = {
+              "schema_version": "1.0.0",
+              "ruid": os.environ.get("RUID", ""),
+              "run_id": os.environ.get("GITHUB_RUN_ID", ""),
+              "run_number": os.environ.get("GITHUB_RUN_NUMBER", ""),
+              "workflow": os.environ.get("GITHUB_WORKFLOW", ""),
+              "repository": os.environ.get("GITHUB_REPOSITORY", ""),
+              "sha": os.environ.get("GITHUB_SHA", ""),
+              "ref": os.environ.get("GITHUB_REF", ""),
+              "created_at_utc": datetime.now(timezone.utc).isoformat(),
+              "status": "generated"
+          }
+
+          with open("evidence/manifest.json", "w", encoding="utf-8") as f:
+              json.dump(manifest, f, indent=2)
+          PY
+
+      - name: Upload evidence artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 30
+```
+
+Arquivo 2: `.github/workflows/evidence-validation.yml`
+
+```yaml
+name: Evidence validation
+
+on:
+  workflow_dispatch:
+    inputs:
+      ruid:
+        description: Run unique ID
+        required: true
+  workflow_run:
+    workflows: ["Homologation runner"]
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: read
+  id-token: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install -r ci/requirements.txt
+
+      - name: Download evidence artifact from triggering workflow
+        if: ${{ github.event_name == 'workflow_run' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: evidence
+          path: evidence
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Validate evidence
+        env:
+          RUID: ${{ github.event_name == 'workflow_dispatch' && inputs.ruid || github.event.workflow_run.id }}
+          EXPECTED_COMMIT: ${{ github.event_name == 'workflow_dispatch' && github.sha || github.event.workflow_run.head_sha }}
+        run: |
+          echo "RUID=$RUID"
+          echo "EXPECTED_COMMIT=$EXPECTED_COMMIT"
+
+          if [ ! -f evidence/manifest.json ]; then
+            echo "manifest.json not found in evidence/"
+            ls -R evidence || true
+            exit 1
+          fi
+
+          python -m ci.validate_evidence \
+            --ruid "$RUID" \
+            --expected-commit "$EXPECTED_COMMIT" \
+            --manifest evidence/manifest.json \
+            --output evidence/validated-graph.json
+```
+
+Comandos de disparo corretos
+
+Para arm-ttk:
+```bash
+gh auth login
+
+gh workflow run homologation-runner.yml \
+  --repo cyrillofrancisco30-lgtm/arm-ttk \
+  --ref master \
+  -f ruid="manual-$(date +%s)"
+
+gh run list --repo cyrillofrancisco30-lgtm/arm-ttk --limit 10
+gh run watch --repo cyrillofrancisco30-lgtm/arm-ttk
+```
+
+Para Xa-Finance-AI-:
+```bash
+gh auth login
+
+gh workflow run homologation-runner.yml \
+  --repo cyrillofrancisco30-lgtm/Xa-Finance-AI- \
+  --ref main \
+  -f ruid="manual-$(date +%s)"
+
+gh run list --repo cyrillofrancisco30-lgtm/Xa-Finance-AI- --limit 10
+gh run watch --repo cyrillofrancisco30-lgtm/Xa-Finance-AI-
+```
+
+Importante:
+- O workflow de validação dispara automaticamente após o `Homologation runner` terminar.
+- O `evidence` precisa ser o nome exato do artefato publicado pelo workflow upstream.
+- Isso valida o pipeline e a geração de evidência operacional, não o estado real do XA Banking Ledger GT7.
+
+
 
 [GitHub Actions for Azure](https://github.com/Azure/actions) help you easily create workflows to build, test, package, release and deploy to Azure, following a push or pull request.
 
