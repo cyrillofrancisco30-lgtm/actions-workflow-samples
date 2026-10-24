@@ -1,4 +1,120 @@
-name: Homologation runner
+
+ Homologation runner
+
+on:
+  workflow_dispatch:
+    inputs:
+      ruid:
+        description: Run unique ID
+        required: true
+        type: string
+  push:
+    branches:
+      - master
+
+permissions:
+  contents: read
+
+jobs:
+  homologation:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        id: install
+        continue-on-error: true
+        run: |
+          python -m pip install -r ci/requirements.txt
+
+      - name: Run tests
+        id: tests
+        if: steps.install.outcome == 'success'
+        continue-on-error: true
+        run: |
+          python -m pytest -q
+
+      - name: Generate evidence manifest
+        if: always()
+        env:
+          RUID: ${{ inputs.ruid || github.run_id }}
+          INSTALL_OUTCOME: ${{ steps.install.outcome }}
+          TEST_OUTCOME: ${{ steps.tests.outcome }}
+        run: |
+          mkdir -p evidence
+
+          python - <<'PY'
+          import json
+          import os
+          from datetime import datetime, timezone
+
+          install = os.environ.get("INSTALL_OUTCOME", "not_run")
+          tests = os.environ.get("TEST_OUTCOME", "not_run")
+
+          status = (
+              "EXECUTION_PASSED"
+              if install == "success" and tests == "success"
+              else "EXECUTION_FAILED"
+          )
+
+          manifest = {
+              "schema_version": "1.0.0",
+              "ruid": os.environ["RUID"],
+              "run_id": os.environ["GITHUB_RUN_ID"],
+              "run_number": os.environ["GITHUB_RUN_NUMBER"],
+              "run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
+              "workflow": os.environ["GITHUB_WORKFLOW"],
+              "repository": os.environ["GITHUB_REPOSITORY"],
+              "sha": os.environ["GITHUB_SHA"],
+              "ref": os.environ["GITHUB_REF"],
+              "created_at_utc": datetime.now(timezone.utc).isoformat(),
+              "install_outcome": install,
+              "tests_outcome": tests,
+              "status": status
+          }
+
+          with open(
+              "evidence/manifest.json", "w", encoding="utf-8"
+          ) as f:
+              json.dump(manifest, f, indent=2)
+          PY
+
+      - name: Upload evidence artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Enforce execution result
+        if: always()
+        env:
+          INSTALL_OUTCOME: ${{ steps.install.outcome }}
+          TEST_OUTCOME: ${{ steps.tests.outcome }}
+        run: |
+          if [ "$INSTALL_OUTCOME" != "success" ]; then
+            echo "::error::Dependency installation did not succeed."
+            exit 1
+          fi
+
+          if [ "$TEST_OUTCOME" != "success" ]; then
+            echo "::error::Tests did not succeed."
+            exit 1
+          fi
+
+
+Homologation runner
 
 on:
   workflow_dispatch:
