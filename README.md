@@ -1,3 +1,141 @@
+XA-TRUST — Reproducible Evidence Validation
+
+Overview
+
+This project provides a GitHub Actions workflow pattern for generating and validating execution evidence.
+
+The pipeline distinguishes YAML parsing, workflow structure, observed execution, test results, and claim-scoped evidence validation.
+
+Important: A successful workflow run does not, by itself, establish ARM-TTK conformance, external service state, or reconciliation with the XA Banking Ledger GT7.
+
+Repository structure
+
+.github/
+└── workflows/
+    ├── homologation-runner.yml
+    └── evidence-validation.yml
+ci/
+├── requirements.txt
+└── validate_evidence.py
+tests/
+└── test_validate_evidence.py
+README.md
+
+The workflow files must be stored in ".github/workflows/". Code blocks in this README are documentation only and are not executed by GitHub Actions.
+
+Workflow responsibilities
+
+1. Homologation runner
+
+File: ".github/workflows/homologation-runner.yml"
+
+Responsibilities:
+
+- Run on "workflow_dispatch" and the configured push branch.
+- Install the declared Python dependencies.
+- Execute the configured test suite.
+- Generate an evidence manifest containing the run ID, run attempt, repository, commit SHA, reference, RUID, timestamp, and observed test outcomes.
+- Upload the manifest as an execution-specific artifact.
+- Fail the job if dependency installation or tests fail.
+
+The manifest is generated evidence, not an independent cryptographic attestation.
+
+2. Evidence validation
+
+File: ".github/workflows/evidence-validation.yml"
+
+Responsibilities:
+
+- Run after the homologation workflow completes or through an explicitly configured manual invocation.
+- Retrieve the artifact from the exact source run and attempt.
+- Check the manifest against the expected source run, commit, attempt, RUID when supplied, and execution conclusion.
+- Produce a validation result.
+- Fail closed when required evidence is missing, inconsistent, or invalid.
+
+The validation workflow and "ci/validate_evidence.py" must implement the same command-line contract. Manual validation must explicitly identify the source run and attempt.
+
+Evidence states
+
+State| Meaning
+"PARSE_VALID"| YAML parsing succeeded.
+"STRUCTURE_VALID"| The workflow structure satisfies the checks performed.
+"EVIDENCE_LIMITED"| Some evidence exists, but required checks remain incomplete.
+"NOT_VERIFIED"| Verification failed or could not be completed.
+"VERIFIED"| All defined checks passed for the explicitly stated claim and evidence scope.
+
+These labels are project-level states. They must not be interpreted as GitHub certifications or external regulatory approvals.
+
+Run the workflow
+
+Install and authenticate GitHub CLI:
+
+gh auth login
+
+Confirm that the workflow exists in the target repository:
+
+gh workflow list \
+  --repo cyrillofrancisco30-lgtm/actions-workflow-samples
+
+Dispatch the workflow only after it has been committed to the target repository:
+
+gh workflow run homologation-runner.yml \
+  --repo cyrillofrancisco30-lgtm/actions-workflow-samples \
+  --ref master \
+  -f ruid="manual-$(date +%s)"
+
+List recent runs:
+
+gh run list \
+  --repo cyrillofrancisco30-lgtm/actions-workflow-samples \
+  --limit 10
+
+Watch a specific run using its actual ID:
+
+gh run watch RUN_ID \
+  --repo cyrillofrancisco30-lgtm/actions-workflow-samples \
+  --exit-status
+
+Replace "RUN_ID" with the ID returned by GitHub CLI. Confirm the repository's actual default branch before using "master".
+
+Verification requirements
+
+Before treating an execution as verified, inspect:
+
+1. The exact workflow run ID and attempt.
+2. The source commit SHA and reference.
+3. The workflow conclusion and individual step logs.
+4. The artifact associated with that exact run and attempt.
+5. The manifest fields and validator output.
+6. The test results and any failed or skipped checks.
+
+A commit or push does not prove that an API or workflow executed. A successful workflow does not prove semantic correctness. A matching hash does not establish the truth of the underlying claim.
+
+Scope limitations
+
+Unless separately implemented and evidenced, this pipeline does not establish:
+
+- ARM-TTK execution or conformance.
+- Azure deployment success or external service state.
+- XA Banking Ledger GT7 reconciliation.
+- Regulatory approval or certification.
+- The semantic truth of external financial claims.
+
+Each additional claim requires its own evidence and validation procedure.
+
+Configuration references
+
+- "GitHub Actions documentation" (https://docs.github.com/en/actions)
+- "Workflow syntax" (https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax)
+- "Artifact actions" (https://github.com/actions/upload-artifact)
+- "Artifact download action" (https://github.com/actions/download-artifact)
+- "GitHub CLI manual" (https://cli.github.com/manual/)
+
+Current verification status
+
+Do not claim that the workflows have passed GitHub-hosted execution until an actual run has been inspected and its artifacts and logs have been reviewed.
+
+Update this section only with reproducible run IDs, commit SHAs, test outcomes, and validation results.
+
 
  Homologation runner
 
